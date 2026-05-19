@@ -38,7 +38,7 @@ machine and patience.
 - Python 3.10+
 - `gcloud` + `bq` CLI: `brew install --cask google-cloud-sdk`
 - A GCP project with billing enabled (new accounts get $300 free credit)
-- `pip install httpx warcio requests`
+- `pip3 install httpx warcio requests`
 
 ---
 
@@ -110,7 +110,7 @@ picks up where it left off.
 ### First run
 
 ```bash
-python enrich.py \
+python3 enrich.py \
   --in wp_sites_httparchive.csv \
   --out wp_sites_enriched.csv \
   --workers 50 \
@@ -149,29 +149,109 @@ Either way, state on disk is consistent.
 ### Alternative: batched run over the split folder
 
 If you split the CSV in step 1d, use `enrich_batch.py` instead. It walks
-the folder in sorted filename order, processes a fixed batch per run, and
-remembers a pointer across runs:
+the folder in sorted filename order, processes a fixed batch per run,
+remembers a pointer across runs, and writes a new result file per run.
+
+#### One-time setup
 
 ```bash
-python enrich_batch.py \
+pip3 install 'httpx[http2]'
+```
+
+#### Each run (same command, every time)
+
+```bash
+python3 enrich_batch.py \
   --dir wp_sites_split \
-  --out wp_sites_enriched.csv \
-  --batch 2000 \
+  --out-dir enriched_splits \
+  --batch 20000 \
   --workers 50
 ```
 
-State files (all next to `--out`):
+That's it. Run it once, run it again tomorrow, run it 200 times — every
+invocation:
 
-- `wp_sites_enriched.csv` — hits
-- `wp_sites_enriched.tried.txt` — lifetime attempts
-- `wp_sites_enriched.progress.json` — `{"file": "part_003.csv", "row": 1742}` resume pointer
+1. Reads `enriched_splits.progress.json` to find the resume pointer.
+2. Reads `enriched_splits.tried.txt` to skip already-attempted domains.
+3. Walks `wp_sites_split/` in sorted filename order from the pointer and
+   takes the next `--batch` unseen domains (spilling across files).
+4. Writes results into a fresh `enriched_splits/run_NNNN.csv`
+   (auto-numbered — new file every run).
+5. Mirrors that into `enriched_splits/with-emails/run_NNNN.csv` and
+   `enriched_splits/without-emails/run_NNNN.csv` for easy filtering.
+6. Advances the pointer **only after the batch finishes**, so Ctrl-C is
+   safe (you keep what you've collected, no domain is skipped).
 
-Each invocation processes up to `--batch` new domains (default 2000),
-spilling across file boundaries as needed. Re-run as often as you like —
-on a cron, manually, whatever. The pointer only advances after the batch
-finishes, so Ctrl-C is safe.
+#### Output layout
 
-2000 domains at 50 workers ≈ 1 minute per run.
+```
+enriched_splits/
+├── run_0000.csv                       # all hits from run 0
+├── run_0001.csv
+├── with-emails/
+│   ├── run_0000.csv                   # subset of run_0000 that has ≥1 email
+│   └── run_0001.csv
+└── without-emails/
+    ├── run_0000.csv                   # subset of run_0000 with no email
+    └── run_0001.csv
+enriched_splits.tried.txt              # every domain attempted (lifetime)
+enriched_splits.progress.json          # {"file": "part_003.csv", "row": 1742}
+```
+
+Don't delete or hand-edit the two state files unless you want to restart
+or move the pointer. They're the only thing that prevents re-running
+domains you've already paid time for.
+
+#### Throughput
+
+20000 domains at 50 workers ≈ 10–15 minutes per run (homepage fetch +
+optional contact-page fallback for sites without a homepage email).
+Full universe (~4.1M) ≈ 200+ runs.
+
+#### Running it in a loop
+
+**Run until done** — chew through everything sequentially in one sitting:
+
+```bash
+while python3 enrich_batch.py --dir wp_sites_split --out-dir enriched_splits \
+                              --batch 20000 --workers 50; do :; done
+```
+
+**Run N times** — useful for an overnight batch where you want a hard cap
+(e.g. 30 iterations × 20k = 600k domains):
+
+```bash
+for i in $(seq 1 30); do
+  echo "=== iteration $i / 30 ==="
+  python3 enrich_batch.py --dir wp_sites_split --out-dir enriched_splits \
+                          --batch 20000 --workers 50 || break
+done
+```
+
+The `|| break` makes the loop stop early if the script exits non-zero —
+either because everything's been processed (exit code `2`) or because
+something went wrong. Each iteration is a separate process with a fresh
+`run_NNNN.csv`; the resume pointer survives across iterations exactly
+the same way it survives across days.
+
+**Logging each iteration to a file** — handy if you walk away:
+
+```bash
+for i in $(seq 1 30); do
+  python3 enrich_batch.py --dir wp_sites_split --out-dir enriched_splits \
+                          --batch 20000 --workers 50 \
+    >> enrich.log 2>&1 || break
+done
+```
+
+#### Email extraction
+
+Each enriched row also gets an `emails` column (pipe-separated, up to 5
+addresses) and an `email_source` column. The scan tries the homepage
+first; if no email is found there, it follows up to 3 `contact`/`about`
+links scraped from the homepage plus a few well-known fallback paths
+(`/contact`, `/contact-us`, `/about`, `/about-us`). Best-fit emails
+(those matching the site's own domain) sort first.
 
 ### Scoring
 
@@ -208,7 +288,7 @@ These convert best on cold outreach for a flipbook plugin.
 If you can't or don't want to set up a GCP billing account:
 
 ```bash
-python commoncrawl_wp.py --crawl CC-MAIN-2026-18 --workers 8 --target 100000
+python3 commoncrawl_wp.py --crawl CC-MAIN-2026-18 --workers 8 --target 100000
 ```
 
 - $0 direct cost
