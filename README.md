@@ -27,7 +27,8 @@ machine and patience.
 | `httparchive_wp.sql` | Expensive variant that also regexes the HTML payload. ~$20–50. Skip unless you have a reason. |
 | `httparchive_run.sh` | Wrapper that runs the SQL via `bq`, dry-runs first to show cost, then writes CSV. |
 | `commoncrawl_wp.py` | Alternative: stream Common Crawl WARCs and detect WordPress by regex. Free but slow (50–200 GB download, ~24h). |
-| `enrich.py` | Resumable homepage scanner. Confirms WP + scores each domain 0–11 for flipbook fit. |
+| `enrich.py` | Resumable homepage scanner over a single CSV. Confirms WP + scores each domain 0–11 for flipbook fit. |
+| `enrich_batch.py` | Same scanner, but walks a folder of split CSVs and processes a fixed batch per run. Tracks a resume pointer across files. |
 
 ---
 
@@ -75,8 +76,28 @@ cp httparchive_wp_cheap.sql httparchive_wp.sql
 
 ### 1c. (Optional) Remove the row limit for the full universe
 
-Edit the SQL and delete the `LIMIT 100000` line. Cost is the same — only
+Edit the SQL and delete the `LIMIT` line if present. Cost is the same — only
 your CSV gets bigger (~200–400 MB for the full list).
+
+For multi-million-row results the script writes a destination table, exports
+gzipped CSV shards to a GCS bucket, then downloads + merges them locally —
+streaming millions of rows directly through `bq query` is unreliable.
+
+### 1d. (Optional) Split the big CSV into chunks
+
+Easier to process in pieces, and required for `enrich_batch.py`:
+
+```bash
+mkdir -p wp_sites_split
+HEADER=$(head -1 wp_sites_httparchive.csv)
+tail -n +2 wp_sites_httparchive.csv | split -l 100000 -d -a 3 - wp_sites_split/part_
+for f in wp_sites_split/part_*; do
+  { echo "$HEADER"; cat "$f"; } > "${f}.csv" && rm "$f"
+done
+```
+
+Produces `wp_sites_split/part_000.csv` … `part_NNN.csv`, 100k rows each,
+header on every file.
 
 ---
 
@@ -124,6 +145,33 @@ laptop — saves your home IP from rate-limit attention and finishes faster.
 
 One Ctrl-C = graceful stop (finishes in-flight requests). Two = hard exit.
 Either way, state on disk is consistent.
+
+### Alternative: batched run over the split folder
+
+If you split the CSV in step 1d, use `enrich_batch.py` instead. It walks
+the folder in sorted filename order, processes a fixed batch per run, and
+remembers a pointer across runs:
+
+```bash
+python enrich_batch.py \
+  --dir wp_sites_split \
+  --out wp_sites_enriched.csv \
+  --batch 2000 \
+  --workers 50
+```
+
+State files (all next to `--out`):
+
+- `wp_sites_enriched.csv` — hits
+- `wp_sites_enriched.tried.txt` — lifetime attempts
+- `wp_sites_enriched.progress.json` — `{"file": "part_003.csv", "row": 1742}` resume pointer
+
+Each invocation processes up to `--batch` new domains (default 2000),
+spilling across file boundaries as needed. Re-run as often as you like —
+on a cron, manually, whatever. The pointer only advances after the batch
+finishes, so Ctrl-C is safe.
+
+2000 domains at 50 workers ≈ 1 minute per run.
 
 ### Scoring
 

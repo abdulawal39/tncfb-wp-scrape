@@ -1,50 +1,31 @@
--- HTTP Archive: WordPress sites with flipbook-relevant signals.
--- Dataset: httparchive.crawl.pages (monthly, ~16M sites, has `technologies` array)
--- Cost: this table is ~TB-scale; the query below targets a single month and
--- filters early. Expect a few GB scanned per run (well under $5 at $5/TB).
+-- Cheap variant: scans only the `technologies` column (~5-20 GB), not `payload`.
+-- Expected cost: < $0.10 per run, fits in BigQuery free tier easily.
+-- Tradeoff: no PDF/catalog signal at SQL stage — recover it via enrich.py.
 --
--- Replace @DATE with the latest available crawl date, e.g. 2026-04-01.
+-- Replace @DATE with latest crawl date, e.g. 2026-04-01.
 
-WITH wp_pages AS (
-  SELECT
-    page                                        AS url,
-    NET.REG_DOMAIN(page)                        AS domain,
-    JSON_VALUE(summary, '$.rank')               AS crux_rank,
-    JSON_VALUE(custom_metrics, '$.other.lang')  AS lang,
-    payload,
-    technologies
-  FROM `httparchive.crawl.pages`
-  WHERE date = DATE('@DATE')
-    AND client = 'desktop'
-    AND is_root_page = TRUE
-    AND EXISTS (
-      SELECT 1 FROM UNNEST(technologies) t
-      WHERE t.technology = 'WordPress'
-    )
-)
 SELECT
-  domain,
-  url,
-  crux_rank,
-  lang,
-  -- Flipbook-relevant signals (heuristic, not exhaustive):
+  NET.REG_DOMAIN(page) AS domain,
+  page AS url,
+  JSON_VALUE(summary, '$.rank') AS crux_rank,
   ARRAY_TO_STRING(
     ARRAY(SELECT t.technology FROM UNNEST(technologies) t
           WHERE t.technology IN (
-            'WooCommerce','Elementor','Issuu','FlipHTML5',
+            'WordPress','WooCommerce','Elementor','Issuu','FlipHTML5',
             'Yoast SEO','WPBakery','Divi','Avada'
           )),
     '|'
   ) AS tech_signals,
-  -- Content hints from the HTML body (cheap regexes):
-  REGEXP_CONTAINS(LOWER(payload), r'\.pdf') AS has_pdf_link,
-  REGEXP_CONTAINS(LOWER(payload), r'(catalog|catalogue|brochure|magazine|lookbook|menu)') AS has_catalog_word,
-  REGEXP_CONTAINS(LOWER(payload), r'(issuu\.com|fliphtml5|flipbook|3dflipbook|dflip)') AS has_flipbook_competitor
-FROM wp_pages
-WHERE
-  -- Keep only sites that show at least one buying signal.
-  REGEXP_CONTAINS(LOWER(payload), r'\.pdf')
-  OR REGEXP_CONTAINS(LOWER(payload), r'(catalog|catalogue|brochure|magazine|lookbook|menu)')
-  OR REGEXP_CONTAINS(LOWER(payload), r'(issuu\.com|fliphtml5|flipbook|3dflipbook|dflip)')
-ORDER BY SAFE_CAST(crux_rank AS INT64) NULLS LAST
-LIMIT 100000;
+  -- Boolean flags for fast filtering downstream:
+  EXISTS(SELECT 1 FROM UNNEST(technologies) t WHERE t.technology = 'Issuu') AS uses_issuu,
+  EXISTS(SELECT 1 FROM UNNEST(technologies) t WHERE t.technology = 'FlipHTML5') AS uses_fliphtml5,
+  EXISTS(SELECT 1 FROM UNNEST(technologies) t WHERE t.technology = 'WooCommerce') AS uses_woo
+FROM `httparchive.crawl.pages`
+WHERE date = DATE('@DATE')
+  AND client = 'desktop'
+  AND is_root_page = TRUE
+  AND EXISTS (
+    SELECT 1 FROM UNNEST(technologies) t
+    WHERE t.technology = 'WordPress'
+  )
+ORDER BY SAFE_CAST(JSON_VALUE(summary, '$.rank') AS INT64) NULLS LAST;
