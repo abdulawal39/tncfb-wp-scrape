@@ -29,6 +29,8 @@ machine and patience.
 | `commoncrawl_wp.py` | Alternative: stream Common Crawl WARCs and detect WordPress by regex. Free but slow (50–200 GB download, ~24h). |
 | `enrich.py` | Resumable homepage scanner over a single CSV. Confirms WP + scores each domain 0–11 for flipbook fit. |
 | `enrich_batch.py` | Same scanner, but walks a folder of split CSVs and processes a fixed batch per run. Tracks a resume pointer across files. |
+| `country.py` | Shared best-effort country detection (ccTLD + page-content signals). Used by `enrich_batch.py` and `backfill_country.py`. |
+| `backfill_country.py` | Adds a `country` column (ccTLD-only) to enriched CSVs written before country detection existed. Idempotent. |
 
 ---
 
@@ -252,6 +254,29 @@ first; if no email is found there, it follows up to 3 `contact`/`about`
 links scraped from the homepage plus a few well-known fallback paths
 (`/contact`, `/contact-us`, `/about`, `/about-us`). Best-fit emails
 (those matching the site's own domain) sort first.
+
+#### Country detection
+
+Each enriched row gets a `country` column (ISO-3166 alpha-2, e.g. `GB`,
+`DE`, blank if unknown). It's resolved in order of confidence:
+
+1. **ccTLD** on the domain — `.co.uk`→GB, `.com.au`→AU, `.de`→DE … (authoritative)
+2. **schema.org `addressCountry`** — scraped from the homepage *or* the
+   contact page (reusing the email-hunt fetch, so no extra requests)
+3. **`og:locale` → `<html lang>` → `tel:+<code>` → `£`** as weaker fallbacks
+
+ccTLD covers roughly half the hits; the content signals fill in generic
+`.com/.org/.net` sites where possible. Detection logic lives in
+`country.py` and is shared with the backfill script.
+
+To add the column to result files written **before** this feature existed
+(ccTLD-only, since their HTML wasn't stored):
+
+```bash
+python3 backfill_country.py --dir enriched_splits
+```
+
+It's idempotent — files that already have a `country` column are skipped.
 
 ### Scoring
 

@@ -34,6 +34,8 @@ from pathlib import Path
 
 import httpx
 
+from country import detect_country
+
 RE_WP = re.compile(r"/wp-content/|/wp-includes/|wp-json|generator[^>]+WordPress", re.I)
 RE_PDF = re.compile(r"\.pdf(\?|\"|')", re.I)
 RE_CATALOG = re.compile(r"catalog|catalogue|brochure|magazine|lookbook|menu", re.I)
@@ -66,7 +68,7 @@ CONTACT_FALLBACK_PATHS = (
 
 FIELDS = ["domain", "final_url", "has_pdf", "has_catalog_word",
           "has_flipbook_competitor", "vertical_match", "fit_score",
-          "emails", "email_source"]
+          "emails", "email_source", "country"]
 
 
 def extract_emails(html: str, domain: str) -> list[str]:
@@ -147,10 +149,11 @@ async def fetch(client: httpx.AsyncClient, url: str) -> str | None:
 
 async def hunt_contact_emails(
     client: httpx.AsyncClient, homepage_html: str, base_url: str, domain: str
-) -> tuple[list[str], str]:
+) -> tuple[list[str], str, str]:
     """Try contact/about links discovered on the homepage, then well-known
-    fallback paths. Return (emails, source_url_or_label) for the first page
-    that yields at least one email."""
+    fallback paths. Return (emails, source_url_or_label, contact_html). The
+    contact_html is from the email-yielding page, else the last page fetched
+    — useful for country detection (address blocks live on contact pages)."""
     candidates: list[str] = []
     seen: set[str] = set()
     for u in find_contact_urls(homepage_html, base_url):
@@ -163,14 +166,16 @@ async def hunt_contact_emails(
             seen.add(u)
             candidates.append(u)
 
+    last_html = ""
     for url in candidates[:4]:
         html = await fetch(client, url)
         if not html:
             continue
+        last_html = html
         emails = extract_emails(html, domain)
         if emails:
-            return emails, url
-    return [], ""
+            return emails, url, html
+    return [], "", last_html
 
 
 async def check(client: httpx.AsyncClient, domain: str) -> dict | None:
@@ -192,8 +197,9 @@ async def check(client: httpx.AsyncClient, domain: str) -> dict | None:
             final_url = str(r.url)
             emails = extract_emails(html, domain)
             email_source = "homepage" if emails else ""
+            contact_html = ""
             if not emails:
-                emails, source_url = await hunt_contact_emails(
+                emails, source_url, contact_html = await hunt_contact_emails(
                     client, html, final_url, domain
                 )
                 if emails:
@@ -209,6 +215,7 @@ async def check(client: httpx.AsyncClient, domain: str) -> dict | None:
                 "fit_score": score,
                 "emails": "|".join(emails),
                 "email_source": email_source,
+                "country": detect_country(domain, html, contact_html),
             }
         except Exception:
             continue
