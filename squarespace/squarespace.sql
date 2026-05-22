@@ -1,5 +1,7 @@
 -- Squarespace sites from HTTP Archive. Cheap variant: scans only the
--- `technologies` column (~5-20 GB), fits in the BigQuery free tier.
+-- `technologies` column (~66 GB), fits in the BigQuery free tier.
+-- Captures BOTH desktop and mobile crawls, deduped to one row per
+-- registered domain (desktop row preferred for a stable CrUX rank).
 -- Replace @DATE with the latest crawl date, e.g. 2026-05-01.
 
 SELECT
@@ -15,10 +17,12 @@ SELECT
   EXISTS(SELECT 1 FROM UNNEST(technologies) t WHERE t.technology = 'FlipHTML5') AS uses_fliphtml5
 FROM `httparchive.crawl.pages`
 WHERE date = DATE('@DATE')
-  AND client = 'desktop'
   AND is_root_page = TRUE
   AND EXISTS (
     SELECT 1 FROM UNNEST(technologies) t
     WHERE t.technology = 'Squarespace'
   )
+QUALIFY ROW_NUMBER() OVER (
+  PARTITION BY NET.REG_DOMAIN(page) ORDER BY client
+) = 1
 ORDER BY SAFE_CAST(JSON_VALUE(summary, '$.rank') AS INT64) NULLS LAST;
