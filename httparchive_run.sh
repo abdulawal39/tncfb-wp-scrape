@@ -60,7 +60,7 @@ bq extract \
 
 echo "Downloading shards..."
 TMPDIR_LOCAL="$(mktemp -d)"
-gsutil -m cp "gs://${BUCKET}/${TABLE}/part-*.csv.gz" "$TMPDIR_LOCAL/"
+gsutil -o "GSUtil:parallel_process_count=1" -m cp "gs://${BUCKET}/${TABLE}/part-*.csv.gz" "$TMPDIR_LOCAL/"
 
 echo "Combining → ${OUT}"
 FIRST=1

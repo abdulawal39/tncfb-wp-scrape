@@ -8,7 +8,7 @@ SELECT
   JSON_VALUE(summary, '$.rank') AS crux_rank,
   ARRAY_TO_STRING(
     ARRAY(SELECT t.technology FROM UNNEST(technologies) t
-          WHERE t.technology IN ('Framer','Issuu','FlipHTML5')),
+          WHERE t.technology IN ('Framer Sites','Issuu','FlipHTML5')),
     '|'
   ) AS tech_signals,
   EXISTS(SELECT 1 FROM UNNEST(technologies) t WHERE t.technology = 'Issuu') AS uses_issuu,
@@ -19,6 +19,6 @@ WHERE date = DATE('@DATE')
   AND is_root_page = TRUE
   AND EXISTS (
     SELECT 1 FROM UNNEST(technologies) t
-    WHERE t.technology = 'Framer'
+    WHERE t.technology = 'Framer Sites'
   )
 ORDER BY SAFE_CAST(JSON_VALUE(summary, '$.rank') AS INT64) NULLS LAST;
