@@ -22,6 +22,8 @@ import csv
 import glob
 from pathlib import Path
 
+from clean_campaign_emails import is_valid, repair
+
 US_CA = {"US", "CA"}
 EUROPE = {
     "GB", "IE", "FR", "DE", "IT", "ES", "PT", "NL", "BE", "LU", "AT", "CH",
@@ -138,7 +140,14 @@ def main():
                 region = region_of(r.get("country", ""))
                 for email in emails:
                     email = email.strip().lower()
-                    if not email or email in seen:
+                    if not email:
+                        continue
+                    if not is_valid(email):
+                        fixed = repair(email)
+                        if not fixed:
+                            continue
+                        email = fixed
+                    if email in seen:
                         continue
                     seen.add(email)
                     new_emails.append(email)

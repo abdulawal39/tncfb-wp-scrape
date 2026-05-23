@@ -353,6 +353,23 @@ After enriching more leads, just re-run the same command. It skips
 everything already copied and appends only new emails — topping up the
 last partial file in each region before rolling to a new one.
 
+Email addresses are validated and repaired before they're written
+(URL-decoding `%20`, stripping `mailto:`/quotes/HTML, extracting the clean
+address), so campaign files only ever contain importable emails.
+
+### Cleaning already-built campaign files
+
+If you built campaign files before validation existed and an import
+rejected malformed addresses, run:
+
+```bash
+python3 clean_campaign_emails.py --dir campaigns_split
+```
+
+It removes invalid emails from every `part_*.csv` in place and writes the
+repaired versions to `campaigns_split/fixed/<region>.csv` (deduped against
+already-valid addresses) so you can re-import just the recovered ones.
+
 ---
 
 ## Alternative path — Common Crawl (free, no GCP)
