@@ -40,6 +40,15 @@ STRIP_CHARS = "\"'<>()[]{} \t\r\n"
 BLOCK_DOMAINS = {"sentry.io", "wixpress.com", "domain.com", "email.com",
                  "yourdomain.com", "yourcompany.com"}
 BLOCK_DOMAIN_SUFFIXES = (".calendar.google.com",)
+# File-extension pseudo-TLDs: scraped asset filenames (logo@2x.avif, etc.)
+# parse as emails but the "TLD" is really an image/asset extension.
+# (.zip/.mov are real TLDs, so deliberately excluded.)
+BLOCK_TLDS = {
+    "avif", "webp", "png", "jpg", "jpeg", "gif", "svg", "ico", "bmp",
+    "tif", "tiff", "css", "js", "mjs", "json", "xml", "html", "htm",
+    "php", "woff", "woff2", "ttf", "otf", "eot", "mp3", "mp4", "webm",
+    "pdf", "swf",
+}
 
 
 def is_valid(email: str) -> bool:
@@ -53,6 +62,8 @@ def is_valid(email: str) -> bool:
     if any(domain.endswith(s) for s in BLOCK_DOMAIN_SUFFIXES):
         return False
     if domain.split(".", 1)[0] == "example":  # example.com / example.co.jp ...
+        return False
+    if domain.rsplit(".", 1)[-1] in BLOCK_TLDS:  # asset filename, not a domain
         return False
     return True
 
