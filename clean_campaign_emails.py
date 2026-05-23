@@ -57,6 +57,10 @@ def is_valid(email: str) -> bool:
     if ".." in email:                       # consecutive dots are invalid
         return False
     local, _, domain = email.partition("@")
+    # RFC 5321 size limits: local <= 64, whole address <= 254. Scraped junk
+    # (concatenated addresses, hex hashes) blows past these.
+    if len(local) > 64 or len(email) > 254:
+        return False
     if domain in BLOCK_DOMAINS:
         return False
     if any(domain.endswith(s) for s in BLOCK_DOMAIN_SUFFIXES):
