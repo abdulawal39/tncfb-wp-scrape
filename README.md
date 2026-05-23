@@ -31,6 +31,7 @@ machine and patience.
 | `enrich_batch.py` | Same scanner, but walks a folder of split CSVs and processes a fixed batch per run. Tracks a resume pointer across files. |
 | `country.py` | Shared best-effort country detection (ccTLD + page-content signals). Used by `enrich_batch.py` and `backfill_country.py`. |
 | `backfill_country.py` | Adds a `country` column (ccTLD-only) to enriched CSVs written before country detection existed. Idempotent. |
+| `build_campaigns.py` | Buckets enriched leads by region into 100k-email campaign files. Incremental, dedupes emails. |
 
 ---
 
@@ -305,6 +306,52 @@ Sites scoring 8+ are typically:
 - Have `.pdf` links on their homepage
 
 These convert best on cold outreach for a flipbook plugin.
+
+---
+
+## Step 4 — Build campaign lists by region
+
+`build_campaigns.py` turns the enriched `with-emails` output into
+ready-to-send, region-bucketed campaign files.
+
+```bash
+python3 build_campaigns.py \
+  --src enriched_splits/with-emails \
+  --out campaigns_split \
+  --per-file 100000
+```
+
+What it does:
+
+- Reads every `enriched_splits/with-emails/run_*.csv`
+- Buckets each lead by its `country` into a region
+- **Explodes to one row per email address** (a site with `info@` and
+  `sales@` becomes two rows)
+- Writes region files capped at 100k emails each (`part_000.csv`, …)
+- Columns: `email, domain, country, fit_score, vertical_match,
+  has_flipbook_competitor, final_url`
+
+Regions:
+
+| Folder | Countries |
+|---|---|
+| `us_canada` | US, CA |
+| `europe` | UK, IE, FR, DE, IT, ES, PT, NL, BE, LU, AT, CH, SE, NO, DK, FI, IS, PL, CZ, SK, HU, RO, BG, GR, HR, SI, EE, LV, LT, RS, UA, MT, CY + smaller European states |
+| `apac_developed` | SG, JP, MY, KR, HK, TW, AU, NZ |
+| `rest` | any other known country (BR, IN, ZA, …) |
+| `unknown` | blank country (couldn't be geolocated) |
+
+### Incremental — safe to re-run
+
+Two state files in `--out` make re-runs additive:
+
+- `.copied_domains.txt` — source domains already consumed
+- `.seen_emails.txt` — every email already written (also dedupes
+  addresses, so the same email never lands in two campaigns)
+
+After enriching more leads, just re-run the same command. It skips
+everything already copied and appends only new emails — topping up the
+last partial file in each region before rolling to a new one.
 
 ---
 
