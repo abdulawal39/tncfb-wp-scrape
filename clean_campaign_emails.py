@@ -35,9 +35,26 @@ EXTRACT = re.compile(
 )
 STRIP_CHARS = "\"'<>()[]{} \t\r\n"
 
+# Non-contact / placeholder domains that pass format checks but bounce or
+# get rejected as invalid by ESPs.
+BLOCK_DOMAINS = {"sentry.io", "wixpress.com", "domain.com", "email.com",
+                 "yourdomain.com", "yourcompany.com"}
+BLOCK_DOMAIN_SUFFIXES = (".calendar.google.com",)
+
 
 def is_valid(email: str) -> bool:
-    return bool(VALID.fullmatch(email)) and "\\" not in email
+    if not VALID.fullmatch(email) or "\\" in email:
+        return False
+    if ".." in email:                       # consecutive dots are invalid
+        return False
+    local, _, domain = email.partition("@")
+    if domain in BLOCK_DOMAINS:
+        return False
+    if any(domain.endswith(s) for s in BLOCK_DOMAIN_SUFFIXES):
+        return False
+    if domain.split(".", 1)[0] == "example":  # example.com / example.co.jp ...
+        return False
+    return True
 
 
 def repair(raw: str) -> str | None:
