@@ -107,13 +107,20 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default="enriched_splits/with-emails")
     ap.add_argument("--out", default="campaigns_split")
+    ap.add_argument("--state-dir", default=None,
+                    help="Where the .copied_domains.txt / .seen_emails.txt "
+                         "dedup state lives (default: same as --out). Point "
+                         "this at the shared campaigns_split to emit only "
+                         "new leads into a separate --out batch folder.")
     ap.add_argument("--per-file", type=int, default=100000)
     args = ap.parse_args()
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    copied_path = out / ".copied_domains.txt"
-    seen_path = out / ".seen_emails.txt"
+    state_dir = Path(args.state_dir) if args.state_dir else out
+    state_dir.mkdir(parents=True, exist_ok=True)
+    copied_path = state_dir / ".copied_domains.txt"
+    seen_path = state_dir / ".seen_emails.txt"
 
     copied = load_lines(copied_path)
     seen = load_lines(seen_path)
