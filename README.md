@@ -357,6 +357,30 @@ Email addresses are validated and repaired before they're written
 (URL-decoding `%20`, stripping `mailto:`/quotes/HTML, extracting the clean
 address), so campaign files only ever contain importable emails.
 
+### Upload-ready batches (only the new leads)
+
+Re-running the default command tops up the cumulative `campaigns_split/`
+files in place, which is awkward when you only want to upload what's new
+since last time. Use `--state-dir` to keep the shared dedup state in
+`campaigns_split/` while writing only the *new* leads into a separate
+batch folder:
+
+```bash
+python3 build_campaigns.py \
+  --out campaigns_batches/batch_002 \
+  --state-dir campaigns_split
+```
+
+- `--state-dir campaigns_split` — reads/updates the shared
+  `.copied_domains.txt` + `.seen_emails.txt`, so nothing already campaigned
+  is included again.
+- `--out campaigns_batches/batch_NNN` — a fresh folder holding only this
+  run's new emails, region-bucketed and capped at 100k/file. Upload this
+  folder on its own.
+
+Bump the batch number each time (`batch_002`, `batch_003`, …). Each batch
+contains strictly the leads enriched since the previous batch.
+
 ### Cleaning already-built campaign files
 
 If you built campaign files before validation existed and an import
